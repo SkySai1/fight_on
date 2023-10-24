@@ -4,6 +4,7 @@ import datetime
 import logging
 import os
 import pickle
+import re
 import struct
 import sys
 from multiprocessing import Pipe
@@ -13,14 +14,18 @@ import time
 from typing import Any
 from threading import Thread
 
-def logserver():
-    loop = asyncio.new_event_loop()
-    listen = loop.create_datagram_endpoint(lambda: LogServer(), ('127.0.0.53', DEFAULT_UDP_LOGGING_PORT))
-    transport, protocol = loop.run_until_complete(listen)
-    loop.run_forever()
-    transport.close()
-    loop.run_until_complete(transport.wait_closed())
-    loop.close()
+
+def logserver(DEFAULT_UDP_LOGGING_PORT=DEFAULT_UDP_LOGGING_PORT):
+    try:
+        loop = asyncio.new_event_loop()
+        listen = loop.create_datagram_endpoint(lambda: LogServer(), ('127.0.0.80', DEFAULT_UDP_LOGGING_PORT), reuse_port=True)
+        transport, protocol = loop.run_until_complete(listen)
+        loop.run_forever()
+        transport.close()
+        loop.run_until_complete(transport.wait_closed())
+        loop.close()
+    except Exception as e:
+        print(e.with_traceback())
 
 def logsetup(CONF, DEFAULT_UDP_LOGGING_PORT=DEFAULT_UDP_LOGGING_PORT):
     try:
@@ -39,7 +44,7 @@ def logsetup(CONF, DEFAULT_UDP_LOGGING_PORT=DEFAULT_UDP_LOGGING_PORT):
             if minimum.lower() not in ['debug','info','warning','error','critical']:
                 raise Exception
             
-            socketHandler = DatagramHandler('127.0.0.53', DEFAULT_UDP_LOGGING_PORT)
+            socketHandler = DatagramHandler('127.0.0.80', DEFAULT_UDP_LOGGING_PORT)
             logging.root.addHandler(socketHandler)
             logging.root.setLevel(minimum.upper())
             logging.getLogger('asyncio').setLevel(logging.WARNING)
@@ -47,10 +52,8 @@ def logsetup(CONF, DEFAULT_UDP_LOGGING_PORT=DEFAULT_UDP_LOGGING_PORT):
             mainlog = logging.getLogger('mainlog')
             mainlog.propagate = False
             logform = LogFormatter(timedelta, "%(asctime)s %(levelname)s %(processName)s - %(threadName)s:: %(message)s")
-            #logform = logging.Formatter("%(asctime)s %(levelname)s %(processName)s - %(threadName)s:: %(message)s")
 
             if CONF['LOGGING']['keeping'] in ["file", "both"]:
-                
                 if eval(CONF['LOGGING']['separate']) is True:
                     seperate = {
                         '/debug_pyns.log':   logging.DEBUG,
@@ -79,13 +82,13 @@ def logsetup(CONF, DEFAULT_UDP_LOGGING_PORT=DEFAULT_UDP_LOGGING_PORT):
                 dbhandler.setFormatter(logform)
                 mainlog.addHandler(dbhandler)
 
-            Thread(target=logserver,daemon=True).start()
+            Thread(target=logserver, args=(DEFAULT_UDP_LOGGING_PORT,),daemon=True).start()
         else:
             logging.disable()
 
         return reciever
     except Exception as e:
-        print(e.with_traceback(None))
+        print(e)
         logging.critical('Bad loging setup', exc_info=(logging.DEBUG >= logging.root.level))
         sys.exit(1)
     
@@ -112,6 +115,8 @@ class LogFilter(object):
 
 
 class LogFormatter(logging.Formatter):
+    ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
     def __init__(self, timedelta, fmt: str | None = None, datefmt: str | None = None, style = "%", validate: bool = True, *, defaults: Mapping[str, Any] | None = None) -> None:
         self.timedelta = timedelta
         super().__init__(fmt, datefmt, style, validate, defaults=defaults)
@@ -127,6 +132,10 @@ class LogFormatter(logging.Formatter):
             return dt.strftime(datefmt)
         else:
             return dt.isoformat(timespec='milliseconds')
+
+    def formatMessage(self, record):
+        record.message = re.sub(self.ANSI_RE, "", record.message)
+        return self._style.format(record)
 
 class LogServer(asyncio.DatagramProtocol):
 

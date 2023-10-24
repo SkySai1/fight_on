@@ -117,7 +117,7 @@ def deafultconf():
     DBName = str(input('Input BASENAME of your Data Base\n'))'''
     config['GENERAL'] = {
         'listen-ip': '127.0.0.2',
-        'listen-port': 53,
+        'listen-port': 8080,
         ";Print statistic in console": None,
         'printstats': False,
         ";For mysql better keep timedelta as 0, for pgsql as your region timezone": None,
